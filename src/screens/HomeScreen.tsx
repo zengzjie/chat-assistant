@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Image, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Image, ScrollView, TouchableOpacity } from 'react-native';
 import { widthPercentageToDP as wp, heightPercentageToDP as hp } from 'react-native-responsive-screen';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArchiveBoxXMarkIcon, StopCircleIcon } from 'react-native-heroicons/outline';
 import Features from '../components/Features';
-import { dummyMessages } from '../constants';
 import Voice, {
   SpeechEndEvent,
   SpeechErrorEvent,
@@ -13,6 +12,7 @@ import Voice, {
 } from '@react-native-voice/voice';
 import { apiCall } from '../api/openApi';
 import { Message } from '../api/types';
+import Tts from 'react-native-tts';
 
 const HomeScreen = () => {
   // 聊天记录
@@ -26,12 +26,18 @@ const HomeScreen = () => {
   // GPT响应 loading
   const [loading, setLoading] = useState(false);
 
+  const scrollViewRef = useRef<ScrollView>(null);
+
   const handleClear = () => {
+    Tts.stop();
+    setSpeaking(false);
+    setLoading(false);
     setMessages([]);
   };
 
   const startRecording = async () => {
     setRecording(true);
+    Tts.stop();
     try {
       await Voice.start('zh-CN');
       // await Voice.start('en-GB'); // en-US
@@ -52,8 +58,34 @@ const HomeScreen = () => {
   };
 
   const stopSpeaking = () => {
+    Tts.stop();
     setSpeaking(false);
   };
+
+  const startTextToSpeech = (message: any) => {
+    console.log(message.content.includes('https'), 'startTextToSpeech');
+
+    if (!message.content.includes('https')) {
+      setSpeaking(true);
+      // 播放带有语音id和语速的响应
+      Tts.speak(message.content, {
+        iosVoiceId: 'com.apple.voice.compact.zh-CN.Tingting',
+        rate: 0.5,
+      } as any);
+      // Tts.speak(message.content);
+    }
+  };
+
+  /**
+   * @description: 每次发送消息后，滚动到底部
+   * @param {*}
+   * @return {*}
+   */
+  const updateScrollView = useCallback(() => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 200);
+  }, []);
 
   const fetchSpeechToGPT = async () => {
     if (speechResult.trim().length > 0) {
@@ -64,16 +96,20 @@ const HomeScreen = () => {
         content: speechResult.trim(),
       });
       setMessages(_messages);
+      updateScrollView();
 
       const resp = await apiCall(speechResult.trim(), _messages);
+      setLoading(false);
       if (resp.success) {
-        setLoading(false);
         setMessages([...resp.data]);
         setSpeechResult('');
+        // 播放最后一条消息
+        startTextToSpeech(resp.data[resp.data.length - 1]);
       } else {
         // Alert.alert('Error', resp.msg);
         setMessages(prev => [...prev, { role: 'assistant', content: resp.msg }]);
       }
+      updateScrollView();
     }
   };
 
@@ -100,6 +136,16 @@ const HomeScreen = () => {
     Voice.onSpeechResults = onSpeechResultsHandler;
     Voice.onSpeechError = onSpeechErrorHandler;
 
+    Tts.setDefaultLanguage('zh-CN');
+    // 获取所有可用的语音
+    // Tts.voices().then(voices => console.log(voices, 'voices'));
+    Tts.addEventListener('tts-start', event => console.log('start', event));
+    Tts.addEventListener('tts-finish', event => {
+      console.log('finish', event);
+      setSpeaking(false);
+    });
+    Tts.addEventListener('tts-cancel', event => console.log('cancel', event));
+
     // 组件销毁时摧毁 Voice 并且移除所有监听
     return () => {
       Voice.destroy().then(Voice.removeAllListeners);
@@ -125,7 +171,11 @@ const HomeScreen = () => {
               </Text>
             </View>
             <View style={{ height: hp(58) }} className="bg-neutral-200 rounded-3xl p-4">
-              <ScrollView bounces={false} className="space-y-4" showsVerticalScrollIndicator={false}>
+              <ScrollView
+                ref={scrollViewRef}
+                bounces={false}
+                className="space-y-4"
+                showsVerticalScrollIndicator={false}>
                 {messages.map((message, index) => {
                   if (message.role === 'assistant') {
                     if (message.content.includes('https')) {
@@ -171,7 +221,9 @@ const HomeScreen = () => {
 
         {/* recording, stop buttons */}
         <View className="justify-center items-center">
-          {recording ? (
+          {loading ? (
+            <Image source={require('../../assets/images/loading.gif')} style={{ width: hp(10), height: hp(10) }} />
+          ) : recording ? (
             // stopRecording buttons
             <TouchableOpacity onPress={stopRecording}>
               <Image

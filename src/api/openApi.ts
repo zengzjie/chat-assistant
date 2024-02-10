@@ -67,6 +67,7 @@ export const dallEApiCall = async (prompt: string, messages: Message[]) => {
   try {
     const resp = await ajax.post<DalleCompletion>(dalleUrl, {
       model: 'dall-e-3',
+      // prompt: 'Create a realistic image of a dog playing with a cat',
       prompt,
       n: 1,
       size: '512x512',
